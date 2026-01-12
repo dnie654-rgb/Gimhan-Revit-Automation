@@ -15,7 +15,6 @@ if %errorlevel% neq 0 (
     echo [ERROR] pyRevit CLI not found!
     echo.
     echo Please make sure pyRevit is installed and added to your PATH.
-    echo You can install it from: https://github.com/eirannejad/pyRevit/releases
     echo.
     pause
     exit /b
@@ -24,53 +23,62 @@ echo [OK] pyRevit found.
 
 :: 2. Define Paths
 set "REPO_URL=https://github.com/dnie654-rgb/Gimhan-Revit-Automation/archive/refs/heads/master.zip"
-set "INSTALL_DIR=%APPDATA%\GimhanRevitExtensions"
+:: Standard pyRevit extensions path: %APPDATA%\pyRevit\Extensions
+:: This automatically handles the Username variable
+set "EXTENSIONS_DIR=%APPDATA%\pyRevit\Extensions"
+set "INSTALL_NAME=Gimhan-Revit-Automation"
+set "FINAL_DIR=%EXTENSIONS_DIR%\%INSTALL_NAME%"
 set "ZIP_FILE=%TEMP%\GimhanRevitExtensions_Master.zip"
 
 :: 3. Prepare Directory
-if exist "%INSTALL_DIR%" (
-    echo [*] Cleaning up previous installation...
-    rmdir /s /q "%INSTALL_DIR%"
+echo [*] Target Directory: %EXTENSIONS_DIR%
+if not exist "%EXTENSIONS_DIR%" (
+    echo [*] Creating extensions directory...
+    mkdir "%EXTENSIONS_DIR%"
 )
-mkdir "%INSTALL_DIR%"
+
+if exist "%FINAL_DIR%" (
+    echo [*] Removing old version...
+    rmdir /s /q "%FINAL_DIR%"
+)
 
 :: 4. Download
 echo [*] Downloading extensions from GitHub...
-echo     URL: %REPO_URL%
 powershell -Command "Invoke-WebRequest -Uri '%REPO_URL%' -OutFile '%ZIP_FILE%'"
 if %errorlevel% neq 0 (
     color 0C
     echo [ERROR] Download failed!
-    echo Please check your internet connection or ensure the URL is correct.
     pause
     exit /b
 )
 
 :: 5. Extract
-echo [*] Extracting file...
-powershell -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%INSTALL_DIR%' -Force"
-del "%ZIP_FILE%"
+echo [*] Extracting files...
+set "TEMP_EXTRACT=%TEMP%\Gimhan_Extract"
+if exist "%TEMP_EXTRACT%" rmdir /s /q "%TEMP_EXTRACT%"
+powershell -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%TEMP_EXTRACT%' -Force"
 
-:: 6. Register with pyRevit
-:: GitHub zips usually extract to a folder named "RepoName-branch" (e.g. Gimhan-Revit-Automation-master)
-set "EXTRACTED_FOLDER=%INSTALL_DIR%\Gimhan-Revit-Automation-master"
-
-if not exist "%EXTRACTED_FOLDER%" (
-    color 0C
-    echo [ERROR] Extraction directory not found: %EXTRACTED_FOLDER%
-    echo The structure might be different than expected.
-    pause
-    exit /b
+:: 6. Move to Target
+if exist "%TEMP_EXTRACT%\Gimhan-Revit-Automation-master" (
+    move "%TEMP_EXTRACT%\Gimhan-Revit-Automation-master" "%FINAL_DIR%"
+) else (
+    move "%TEMP_EXTRACT%" "%FINAL_DIR%"
 )
 
+:: Clean up
+del "%ZIP_FILE%"
+rmdir /s /q "%TEMP_EXTRACT%"
+
+:: 7. Register
 echo [*] Registering extensions with pyRevit...
-pyrevit extend paths --add "%EXTRACTED_FOLDER%"
+pyrevit extend paths --add "%FINAL_DIR%"
 
 echo.
 echo ========================================================
-echo [SUCCESS] Extensions have been installed!
+echo [SUCCESS] Extensions installed to:
+echo %FINAL_DIR%
 echo.
-echo Please Restart Revit or Reload pyRevit to see the new tabs.
+echo Please Restart Revit to see the new tools.
 echo ========================================================
 echo.
 pause
