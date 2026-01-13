@@ -53,9 +53,13 @@ if exist "%SOURCE_DIR%\LinkTools.extension" (
     move "%SOURCE_DIR%\LinkTools.extension" "%EXTENSIONS_DIR%\"
 )
 
-if exist "%SOURCE_DIR%\HostTools.extension" (
     if exist "%EXTENSIONS_DIR%\HostTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\HostTools.extension"
     move "%SOURCE_DIR%\HostTools.extension" "%EXTENSIONS_DIR%\"
+)
+
+if exist "%SOURCE_DIR%\Update.extension" (
+    if exist "%EXTENSIONS_DIR%\Update.extension" rmdir /s /q "%EXTENSIONS_DIR%\Update.extension"
+    move "%SOURCE_DIR%\Update.extension" "%EXTENSIONS_DIR%\"
 )
 
 :: Clean up
