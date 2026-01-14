@@ -137,3 +137,4 @@ if !errorlevel! neq 0 (
 echo.
 echo [SUCCESS] Everything is synced and verified!
 pause
+
