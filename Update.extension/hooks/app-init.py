@@ -25,12 +25,11 @@ def check_for_updates():
 
     try:
         # 1. Fetch from remote in background
-        # Use a short timeout to prevent Revit startup delay if internet is slow
+        # Note: 'timeout' is not supported in IronPython 2.7 subprocess
         subprocess.check_call(
             ["git", "fetch", "origin"],
             cwd=repo_root,
-            shell=True,
-            timeout=10 # 10 seconds timeout
+            shell=True
         )
 
         # 2. Check status
@@ -53,8 +52,6 @@ def check_for_updates():
             
             if res:
                 # Trigger the update script logic
-                # For simplicity, we can just run git pull here
-                # or tell the user to use the Update button.
                 update_process = subprocess.Popen(
                     ["git", "pull"],
                     cwd=repo_root,
@@ -77,11 +74,8 @@ def check_for_updates():
                         title="Update Error"
                     )
                     
-    except subprocess.TimeoutExpired:
-        # Git fetch took too long, silently ignore to not block startup
-        pass
     except Exception:
-        # Ignore other errors during startup to avoid annoying the user
+        # Ignore all errors during startup to avoid annoying the user
         pass
 
 if __name__ == "__main__":
