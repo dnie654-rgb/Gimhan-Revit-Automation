@@ -31,8 +31,10 @@ def run_sync():
         if len(counts) >= 2 and int(counts[1]) > 0:
             res = forms.alert("Updates found. Would you like to sync now?", yes=True, no=True)
             if res:
+                # Use clean -fd to remove folders that are gone from Git
                 subprocess.check_call(["git", "reset", "--hard", "origin/master"], cwd=repo_root, shell=True)
-                forms.alert("Successfully updated! Please reload pyRevit.", title="Success")
+                subprocess.check_call(["git", "clean", "-fd"], cwd=repo_root, shell=True)
+                forms.alert("Successfully updated and cleaned! Please reload pyRevit.", title="Success")
         else:
             forms.alert("Extensions are already up to date.", title="Status")
     except Exception as e:
