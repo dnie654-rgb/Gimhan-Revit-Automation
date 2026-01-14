@@ -1,0 +1,5 @@
+type: extension
+name: Updater
+description: Tool to update extensions from GitHub
+author: Antigravity
+version: 1.0.0
