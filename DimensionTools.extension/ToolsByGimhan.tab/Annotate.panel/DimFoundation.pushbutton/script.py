@@ -44,115 +44,126 @@ def get_dimension_type_by_name(doc, name):
     return None
 
 def create_dimensions_for_foundation(doc, view, foundation):
-    """Refined Dimensioning: Sorted References + Strict Plane Alignment."""
+    """Greedy Dimensioning Strategy: Named References -> Centers -> Geometry Fallback."""
     created_ids = []
-    
-    # 1. Setup Directions and Style
-    x_dir = view.RightDirection
-    y_dir = view.UpDirection
-    level_elev = view.GenLevel.Elevation if view.GenLevel else view.Origin.Z
+    # Use view origin Z as the definitive anchor for the dimension line
+    level_elev = view.Origin.Z 
     
     dim_style_name = "Diagonal - 2.5mm Arial"
     dim_type = get_dimension_type_by_name(doc, dim_style_name)
 
-    # 2. Scrape Faces with View-Specific Options
-    opt = DB.Options()
-    opt.ComputeReferences = True
-    opt.View = view
-    opt.IncludeNonVisibleObjects = True
-    
-    geom = foundation.get_Geometry(opt)
-    if not geom: return created_ids
+    bbox = foundation.get_BoundingBox(view)
+    if not bbox: return created_ids
+    center = (bbox.Min + bbox.Max) / 2.0
 
-    side_faces = []
-    def walk_geom(g_elem):
-        for obj in g_elem:
-            if isinstance(obj, DB.Solid):
-                for face in obj.Faces:
-                    if not face.Reference: continue
-                    normal = face.ComputeNormal(DB.UV(0.5, 0.5))
-                    # Normal must be perpendicular to view direction (usually Z)
-                    if abs(normal.DotProduct(view.ViewDirection)) < 0.01:
-                        side_faces.append((face, normal))
-            elif isinstance(obj, DB.GeometryInstance):
-                walk_geom(obj.GetInstanceGeometry())
+    # Ensure the "Dimensions" category is forced to ON
+    cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_Dimensions)
+    try:
+        if view.GetCategoryHidden(cat.Id):
+            view.SetCategoryHidden(cat.Id, False)
+    except: pass
 
-    walk_geom(geom)
-    if not side_faces: return created_ids
-
-    # 3. Group and SORT pairs
-    # Sorting ensures ReferenceArray order: [Left, Right] or [Bottom, Top]
-    pairs = []
-    used = set()
-    for i in range(len(side_faces)):
-        if i in used: continue
-        f1, n1 = side_faces[i]
-        for j in range(i + 1, len(side_faces)):
-            if j in used: continue
-            f2, n2 = side_faces[j]
-            # Parallel check
-            if abs(abs(n1.DotProduct(n2)) - 1.0) < 0.01:
-                # Get center points for sorting
-                p1 = f1.Evaluate(DB.UV(0.5, 0.5))
-                p2 = f2.Evaluate(DB.UV(0.5, 0.5))
-                
-                # Determine "Order" (e.g., sort by X or Y)
-                if abs(n1.X) > abs(n1.Y): # Faces are X-facing (Vertical sides)
-                    sorted_pair = [(f1, n1), (f2, n2)] if p1.X < p2.X else [(f2, n2), (f1, n1)]
-                else: # Faces are Y-facing (Horizontal sides)
-                    sorted_pair = [(f1, n1), (f2, n2)] if p1.Y < p2.Y else [(f2, n2), (f1, n1)]
-                
-                pairs.append(sorted_pair)
-                used.add(i)
-                used.add(j)
-                break
-
-    # 4. Create Dimensions
-    for pair in pairs:
-        (f_low, n_low), (f_high, n_high) = pair
-        
-        # Decide placement side: 
-        # For X-facing (vertical) pairs -> Right of high face (+X)
-        # For Y-facing (horizontal) pairs -> Bottom of low face (-Y)
-        is_x_facing = abs(n_low.X) > abs(n_low.Y)
-        
+    # --- Dimension Factory ---
+    def make_dim(ref_list, is_width_dim):
+        """Creates a dimension from references. is_width_dim = measures Y, line is horizontal."""
+        if len(ref_list) < 2: return None
         ref_array = DB.ReferenceArray()
-        ref_array.Append(f_low.Reference)
-        ref_array.Append(f_high.Reference)
+        for r in ref_list: ref_array.Append(r)
         
-        bbox = foundation.get_BoundingBox(view)
-        if not bbox: continue
-        center = (bbox.Min + bbox.Max) / 2.0
-        
-        if is_x_facing:
-            # Length Dim (Placed on Right)
-            dim_line_dir = y_dir
-            placement_normal = DB.XYZ(1, 0, 0) # Right
-            offset = (bbox.Max.X - bbox.Min.X) / 2.0 + 3.0
-        else:
-            # Width Dim (Placed on Bottom)
-            dim_line_dir = x_dir
-            placement_normal = DB.XYZ(0, -1, 0) # Bottom
+        if is_width_dim: # measures Y dist (Places line at Bottom -Y)
+            placement_normal = DB.XYZ(0, -1, 0)
             offset = (bbox.Max.Y - bbox.Min.Y) / 2.0 + 3.0
+            dim_line_dir = DB.XYZ(1, 0, 0)
+        else: # measures X dist (Places line at Right +X)
+            placement_normal = DB.XYZ(1, 0, 0)
+            offset = (bbox.Max.X - bbox.Min.X) / 2.0 + 3.0
+            dim_line_dir = DB.XYZ(0, 1, 0)
 
+        # Line setup (Force exact coplanar alignment)
         line_orig = center + placement_normal * offset
         line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev)
         line = DB.Line.CreateBound(line_orig - dim_line_dir, line_orig + dim_line_dir)
 
         try:
-            # Final attempt creation
-            dim = None
+            # Draw visual debug line
+            try: doc.Create.NewDetailCurve(view, line)
+            except: pass
+            
             if dim_type:
-                dim = doc.Create.NewDimension(view, line, ref_array, dim_type)
-            else:
-                dim = doc.Create.NewDimension(view, line, ref_array)
-            
-            if dim:
-                created_ids.append(dim.Id)
-                print(">>> Dimension {} successfully created at {}.".format(dim.Id, line_orig))
+                return doc.Create.NewDimension(view, line, ref_array, dim_type)
+            return doc.Create.NewDimension(view, line, ref_array)
         except Exception as e:
-            print("!!! Dimension Creation Error: {}".format(e))
-            
+            print("Strategy Attempt Error: {}".format(e))
+            return None
+
+    # --- PRIORITY 1: Named Family References ---
+    # Revit families often have named planes built-in. These are the most stable.
+    # Front/Back usually define the depth (Y), Left/Right define width (X).
+    r_front = foundation.GetReferences(DB.FamilyInstanceReferenceType.Front)
+    r_back = foundation.GetReferences(DB.FamilyInstanceReferenceType.Back)
+    r_left = foundation.GetReferences(DB.FamilyInstanceReferenceType.Left)
+    r_right = foundation.GetReferences(DB.FamilyInstanceReferenceType.Right)
+
+    if r_front and r_back:
+        d = make_dim([r_front[0], r_back[0]], True)
+        if d: created_ids.append(d.Id)
+    
+    if r_left and r_right:
+        d = make_dim([r_left[0], r_right[0]], False)
+        if d: created_ids.append(d.Id)
+
+    if created_ids:
+        print(">>> Success: Dimensions created using Named Family References.")
+        return created_ids
+
+    # --- PRIORITY 2: Center Planes Fallback ---
+    # Sometimes planes are named CenterLeftRight or CenterFrontBack
+    r_cfb = foundation.GetReferences(DB.FamilyInstanceReferenceType.CenterFrontBack)
+    r_clr = foundation.GetReferences(DB.FamilyInstanceReferenceType.CenterLeftRight)
+
+    if not created_ids:
+        if r_cfb and r_front:
+            d = make_dim([r_cfb[0], r_front[0]], True)
+            if d: created_ids.append(d.Id)
+        if r_clr and r_left:
+            d = make_dim([r_clr[0], r_left[0]], False)
+            if d: created_ids.append(d.Id)
+
+    if created_ids:
+        print(">>> Success: Dimensions created using Center Fallbacks.")
+        return created_ids
+
+    # --- PRIORITY 3: Geometry Scraping (Final Fallback) ---
+    print(">>> Strategy 1 & 2 failed. Falling back to Geometry Scraping...")
+    side_faces = get_side_faces(foundation, view)
+    if side_faces:
+        pairs = []
+        used = set()
+        for i in range(len(side_faces)):
+            if i in used: continue
+            f1, n1 = side_faces[i]
+            for j in range(i + 1, len(side_faces)):
+                if j in used: continue
+                f2, n2 = side_faces[j]
+                if abs(abs(n1.DotProduct(n2)) - 1.0) < 0.01:
+                    # Sort references (ensure low-to-high)
+                    p1 = f1.Evaluate(DB.UV(0.5, 0.5))
+                    p2 = f2.Evaluate(DB.UV(0.5, 0.5))
+                    is_x_aligned = abs(n1.X) > abs(n1.Y)
+                    if is_x_aligned:
+                        pair = [(f1, n1), (f2, n2)] if p1.X < p2.X else [(f2, n2), (f1, n1)]
+                    else:
+                        pair = [(f1, n1), (f2, n2)] if p1.Y < p2.Y else [(f2, n2), (f1, n1)]
+                    pairs.append(pair)
+                    used.add(i); used.add(j)
+                    break
+        
+        for p in pairs:
+            fl, fh = p[0][0], p[1][0]
+            is_horiz = abs(p[0][1].Y) > abs(p[0][1].X)
+            d = make_dim([fl.Reference, fh.Reference], is_horiz)
+            if d: created_ids.append(d.Id)
+
     return created_ids
 
 def main():
