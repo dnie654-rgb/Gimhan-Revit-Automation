@@ -16,6 +16,10 @@ Tools for interacting with Revit Links.
 Tools for modifying element hosts.
 - **Change Level**: Batch change the Host Level of selected elements while preserving their 3D position (automatically adjusting offsets).
 
+### 4. DimensionTools
+Automates dimensioning for various Revit elements.
+- **Foundation Dim**: Automatically adds length and width dimensions to rectangular foundations in plan views, placed on the right and bottom sides.
+
 ## Installation
 
 ### Option 1: Automatic Installation (Recommended)
