@@ -145,11 +145,16 @@ def create_dimensions(doc, view, foundation):
             dim = doc.Create.NewDimension(view, line, ref_array)
             if dim:
                 count += 1
-                print(">>> Dimension object created successfully.")
+                print(">>> Dimension object created successfully ID: {}.".format(dim.Id))
+                # Explicitly check visibility
+                if dim.IsHidden(view):
+                    print("!!! Warning: Created dimension is HIDDEN in this view.")
+                
+                return dim # Return the first one for simplicity or collect them
         except Exception as e:
             print("!!! Failed to create dimension: {}".format(e))
 
-    return count
+    return None
 
 def main():
     doc = revit.doc
@@ -172,15 +177,70 @@ def main():
     if not foundations:
         forms.alert("No Structural Foundations selected.", exitscript=True)
 
-    total_created = 0
+    created_dims = []
     with revit.Transaction("Dimension Foundations"):
         for fnd in foundations:
-            total_created += create_dimensions(doc, view, fnd)
+            # Modified create_dimensions to return the objects created
+            # Since my logic currently creates 2 dims per foundation
+            # let's collect them all
+            side_faces = get_side_faces(fnd, view)
+            if len(side_faces) < 4: continue
+            
+            pairs = []
+            used_indices = set()
+            for i in range(len(side_faces)):
+                if i in used_indices: continue
+                f1, n1 = side_faces[i]
+                for j in range(i + 1, len(side_faces)):
+                    if j in used_indices: continue
+                    f2, n2 = side_faces[j]
+                    if abs(abs(n1.DotProduct(n2)) - 1.0) < 0.01:
+                        pairs.append(((f1, n1), (f2, n2)))
+                        used_indices.add(i)
+                        used_indices.add(j)
+                        break
+            
+            if len(pairs) < 2: continue
 
-    if total_created > 0:
-        print("Created {} dimensions.".format(total_created))
+            # Refactored inner logic to collect dims
+            bbox = fnd.get_BoundingBox(view)
+            center = (bbox.Min + bbox.Max) / 2.0
+            level_elev = view.GenLevel.Elevation if view.GenLevel else view.Origin.Z
+
+            for pair in pairs:
+                (f1, n1), (f2, n2) = pair
+                placement_normal = n1
+                if abs(n1.X) > abs(n1.Y):
+                    if n1.X < 0: placement_normal = n2
+                else:
+                    if n1.Y > 0: placement_normal = n2
+
+                ref_array = DB.ReferenceArray()
+                ref_array.Append(f1.Reference)
+                ref_array.Append(f2.Reference)
+                
+                dist = f1.Evaluate(DB.UV(0.5, 0.5)).DistanceTo(f2.Evaluate(DB.UV(0.5, 0.5)))
+                dim_line_origin = center + placement_normal * (dist/2.0 + 1.5)
+                dim_line_origin = DB.XYZ(dim_line_origin.X, dim_line_origin.Y, level_elev)
+
+                perp_dir = view.UpDirection if abs(placement_normal.X) > abs(placement_normal.Y) else view.RightDirection
+                line = DB.Line.CreateBound(dim_line_origin - perp_dir * 3, dim_line_origin + perp_dir * 3)
+
+                try:
+                    d = doc.Create.NewDimension(view, line, ref_array)
+                    if d: created_dims.append(d.Id)
+                except: pass
+
+    if created_dims:
+        print("Created {} dimensions. SELECTING them now...".format(len(created_dims)))
+        # SELECT the created dimensions so user can see them highlighted
+        uidoc.Selection.SetElementIds(List[DB.ElementId](created_dims))
     else:
-        forms.alert("No dimensions could be created. Check if foundations are rectangular and visible.")
+        forms.alert("No dimensions could be created.")
 
 if __name__ == "__main__":
+    # Import List for selection
+    import clr
+    clr.AddReference('System')
+    from System.Collections.Generic import List
     main()
