@@ -228,8 +228,18 @@ def main():
 
                 try:
                     d = doc.Create.NewDimension(view, line, ref_array)
-                    if d: created_dims.append(d.Id)
-                except: pass
+                    if d: 
+                        created_dims.append(d.Id)
+                        # --- DEBUG: Draw a temporary line to see where it is ---
+                        try:
+                            doc.Create.NewDetailCurve(view, line)
+                        except: pass
+                        
+                        # Check visibility again
+                        if d.IsHidden(view):
+                            print("!!! Warning: Dimension {} is HIDDEN in this view.".format(d.Id))
+                except Exception as e:
+                    print("!!! Final failed attempt: {}".format(e))
 
     if created_dims:
         print("Created {} dimensions. SELECTING them now...".format(len(created_dims)))
