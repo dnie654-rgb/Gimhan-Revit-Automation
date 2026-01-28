@@ -44,26 +44,44 @@ def get_dimension_type_by_name(doc, name):
     return None
 
 def create_dimensions_for_foundation(doc, view, foundation):
-    """Robust dimensioning: Handles rotation by calculating perpendicular directions."""
+    """Refined Dimensioning: Sorted References + Strict Plane Alignment."""
     created_ids = []
     
-    # 1. Setup
+    # 1. Setup Directions and Style
+    x_dir = view.RightDirection
+    y_dir = view.UpDirection
     level_elev = view.GenLevel.Elevation if view.GenLevel else view.Origin.Z
     
     dim_style_name = "Diagonal - 2.5mm Arial"
     dim_type = get_dimension_type_by_name(doc, dim_style_name)
 
-    bbox = foundation.get_BoundingBox(view)
-    if not bbox: return created_ids
-    center = (bbox.Min + bbox.Max) / 2.0
+    # 2. Scrape Faces with View-Specific Options
+    opt = DB.Options()
+    opt.ComputeReferences = True
+    opt.View = view
+    opt.IncludeNonVisibleObjects = True
+    
+    geom = foundation.get_Geometry(opt)
+    if not geom: return created_ids
 
-    # 2. Get Side Faces
-    side_faces = get_side_faces(foundation, view)
-    if not side_faces:
-        print("!!! Face Scraping: No vertical side faces found.")
-        return created_ids
+    side_faces = []
+    def walk_geom(g_elem):
+        for obj in g_elem:
+            if isinstance(obj, DB.Solid):
+                for face in obj.Faces:
+                    if not face.Reference: continue
+                    normal = face.ComputeNormal(DB.UV(0.5, 0.5))
+                    # Normal must be perpendicular to view direction (usually Z)
+                    if abs(normal.DotProduct(view.ViewDirection)) < 0.01:
+                        side_faces.append((face, normal))
+            elif isinstance(obj, DB.GeometryInstance):
+                walk_geom(obj.GetInstanceGeometry())
 
-    # 3. Group by Normals
+    walk_geom(geom)
+    if not side_faces: return created_ids
+
+    # 3. Group and SORT pairs
+    # Sorting ensures ReferenceArray order: [Left, Right] or [Bottom, Top]
     pairs = []
     used = set()
     for i in range(len(side_faces)):
@@ -72,53 +90,57 @@ def create_dimensions_for_foundation(doc, view, foundation):
         for j in range(i + 1, len(side_faces)):
             if j in used: continue
             f2, n2 = side_faces[j]
-            # Check for parallel faces (dot product 1 or -1)
+            # Parallel check
             if abs(abs(n1.DotProduct(n2)) - 1.0) < 0.01:
-                pairs.append(((f1, n1), (f2, n2)))
+                # Get center points for sorting
+                p1 = f1.Evaluate(DB.UV(0.5, 0.5))
+                p2 = f2.Evaluate(DB.UV(0.5, 0.5))
+                
+                # Determine "Order" (e.g., sort by X or Y)
+                if abs(n1.X) > abs(n1.Y): # Faces are X-facing (Vertical sides)
+                    sorted_pair = [(f1, n1), (f2, n2)] if p1.X < p2.X else [(f2, n2), (f1, n1)]
+                else: # Faces are Y-facing (Horizontal sides)
+                    sorted_pair = [(f1, n1), (f2, n2)] if p1.Y < p2.Y else [(f2, n2), (f1, n1)]
+                
+                pairs.append(sorted_pair)
                 used.add(i)
                 used.add(j)
                 break
-    
+
     # 4. Create Dimensions
     for pair in pairs:
-        (f1, n1), (f2, n2) = pair
+        (f_low, n_low), (f_high, n_high) = pair
         
-        # Determine Placement Side
-        # We'll use the one that is more "Right" (+X) or "Bottom" (-Y)
-        placement_normal = n1
-        if n1.X + n1.Y < n2.X + n2.Y:
-            # This is a bit of a heuristic to find the "outer" normal
-            # For Right/Bottom, let's just pick based on world coordinates
-            if abs(n1.X) > abs(n1.Y): # Mostly Horizontal
-                if n1.X < 0: placement_normal = n2
-            else: # Mostly Vertical
-                if n1.Y > 0: placement_normal = n2
-
+        # Decide placement side: 
+        # For X-facing (vertical) pairs -> Right of high face (+X)
+        # For Y-facing (horizontal) pairs -> Bottom of low face (-Y)
+        is_x_facing = abs(n_low.X) > abs(n_low.Y)
+        
         ref_array = DB.ReferenceArray()
-        ref_array.Append(f1.Reference)
-        ref_array.Append(f2.Reference)
+        ref_array.Append(f_low.Reference)
+        ref_array.Append(f_high.Reference)
         
-        # PERPENDICULAR DIRECTION: Calculate exactly from normal to handle rotation
-        # Dimension line must be perfectly perpendicular to the face normal
-        perp_dir = DB.XYZ.BasisZ.CrossProduct(placement_normal).Normalize()
+        bbox = foundation.get_BoundingBox(view)
+        if not bbox: continue
+        center = (bbox.Min + bbox.Max) / 2.0
         
-        # Position with offset
-        # Distance between faces
-        p1 = f1.Evaluate(DB.UV(0.5, 0.5))
-        p2 = f2.Evaluate(DB.UV(0.5, 0.5))
-        dist = p1.DistanceTo(p2)
-        
-        offset_dist = dist/2.0 + 3.0 # 3 feet away
-        line_orig = center + placement_normal * offset_dist
-        line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev)
+        if is_x_facing:
+            # Length Dim (Placed on Right)
+            dim_line_dir = y_dir
+            placement_normal = DB.XYZ(1, 0, 0) # Right
+            offset = (bbox.Max.X - bbox.Min.X) / 2.0 + 3.0
+        else:
+            # Width Dim (Placed on Bottom)
+            dim_line_dir = x_dir
+            placement_normal = DB.XYZ(0, -1, 0) # Bottom
+            offset = (bbox.Max.Y - bbox.Min.Y) / 2.0 + 3.0
 
-        line = DB.Line.CreateBound(line_orig - perp_dir * 2, line_orig + perp_dir * 2)
-        
+        line_orig = center + placement_normal * offset
+        line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev)
+        line = DB.Line.CreateBound(line_orig - dim_line_dir, line_orig + dim_line_dir)
+
         try:
-            # Draw visual debug line
-            try: doc.Create.NewDetailCurve(view, line)
-            except: pass
-            
+            # Final attempt creation
             dim = None
             if dim_type:
                 dim = doc.Create.NewDimension(view, line, ref_array, dim_type)
@@ -127,9 +149,9 @@ def create_dimensions_for_foundation(doc, view, foundation):
             
             if dim:
                 created_ids.append(dim.Id)
-                print(">>> Dimension {} created successfully.".format(dim.Id))
+                print(">>> Dimension {} successfully created at {}.".format(dim.Id, line_orig))
         except Exception as e:
-            print("!!! Revit Error creating dimension: {}".format(e))
+            print("!!! Dimension Creation Error: {}".format(e))
             
     return created_ids
 
