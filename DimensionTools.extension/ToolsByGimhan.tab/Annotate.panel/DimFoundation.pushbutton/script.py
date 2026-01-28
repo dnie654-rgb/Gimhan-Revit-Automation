@@ -44,7 +44,7 @@ def get_dimension_type_by_name(doc, name):
     return None
 
 def create_dimensions_for_foundation(doc, view, foundation):
-    """Unified dimension logic: Face Scraping + Specific Style + View Alignment."""
+    """Refined dimensioning using user-requested style and high-priority references."""
     created_ids = []
     
     # 1. Setup
@@ -52,20 +52,21 @@ def create_dimensions_for_foundation(doc, view, foundation):
     y_dir = view.UpDirection
     level_elev = view.GenLevel.Elevation if view.GenLevel else view.Origin.Z
     
+    # User's Style
     dim_style_name = "Diagonal - 2.5mm Arial"
     dim_type = get_dimension_type_by_name(doc, dim_style_name)
 
     bbox = foundation.get_BoundingBox(view)
     if not bbox: return created_ids
+    
+    # Calculate Center
     center = (bbox.Min + bbox.Max) / 2.0
-
-    # 2. Get Side Faces
+    
+    # Get Faces
     side_faces = get_side_faces(foundation, view)
-    if not side_faces:
-        print("!!! No vertical side faces found for foundation {}.".format(foundation.Id))
-        return created_ids
+    if not side_faces: return created_ids
 
-    # 3. Group by Normals
+    # Group into pairs
     pairs = []
     used = set()
     for i in range(len(side_faces)):
@@ -80,36 +81,41 @@ def create_dimensions_for_foundation(doc, view, foundation):
                 used.add(j)
                 break
     
-    # 4. Create Dimensions
+    # Create Dimensions
     for pair in pairs:
         (f1, n1), (f2, n2) = pair
         
         # Determine Placement (Right or Bottom)
+        is_x_side = abs(n1.DotProduct(x_dir)) > 0.9
         placement_normal = n1
-        # If n1 is mostly X
-        if abs(n1.DotProduct(x_dir)) > 0.9:
-            # X-direction faces (needs Right side +X)
-            is_horizontal_dim = False # Line is Vertical
+        
+        if is_x_side: # X-aligned faces -> Needs Vertical Dim on Right
             if n1.DotProduct(x_dir) < 0: placement_normal = n2
-        else:
-            # Y-direction faces (needs Bottom side -Y)
-            is_horizontal_dim = True # Line is Horizontal
+            is_horizontal_dim = False
+        else: # Y-aligned faces -> Needs Horizontal Dim on Bottom
             if n1.DotProduct(y_dir) > 0: placement_normal = n2
+            is_horizontal_dim = True
 
         ref_array = DB.ReferenceArray()
         ref_array.Append(f1.Reference)
         ref_array.Append(f2.Reference)
         
-        # Position
-        dist = f1.Evaluate(DB.UV(0.5, 0.5)).DistanceTo(f2.Evaluate(DB.UV(0.5, 0.5)))
-        line_orig = center + placement_normal * (dist/2.0 + 1.5)
-        # Force Z to View level
-        line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev)
+        # Position with LARGER offset (4 feet) for clear visibility
+        face_dist = bbox.Max.X - bbox.Min.X if not is_horizontal_dim else bbox.Max.Y - bbox.Min.Y
+        offset_val = face_dist/2.0 + 3.0 # 3 feet clear offset
+        
+        line_orig = center + placement_normal * offset_val
+        # Force Z slightly above level for visibility (0.1 feet)
+        line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev + 0.1)
 
         perp_dir = y_dir if not is_horizontal_dim else x_dir
         line = DB.Line.CreateBound(line_orig - perp_dir, line_orig + perp_dir)
         
         try:
+            # OPTIONAL: Draw a detail line for verification (User says these are visible!)
+            try: doc.Create.NewDetailCurve(view, line)
+            except: pass
+            
             dim = None
             if dim_type:
                 dim = doc.Create.NewDimension(view, line, ref_array, dim_type)
