@@ -7,6 +7,34 @@ Automatically adds length and width dimensions to rectangular foundations in pla
 from pyrevit import revit, forms, DB
 import traceback
 
+def get_side_faces(foundation, view):
+    """Get the vertical side faces of a foundation."""
+    side_faces = []
+    opt = DB.Options()
+    opt.ComputeReferences = True
+    opt.View = view
+    opt.IncludeNonVisibleObjects = True
+    
+    geom = foundation.get_Geometry(opt)
+    if not geom: return side_faces
+
+    view_dir = view.ViewDirection
+
+    def walk_geom(g_elem):
+        found = []
+        for obj in g_elem:
+            if isinstance(obj, DB.Solid):
+                for face in obj.Faces:
+                    if not face.Reference: continue
+                    normal = face.ComputeNormal(DB.UV(0.5, 0.5))
+                    if abs(normal.DotProduct(view_dir)) < 0.01:
+                        found.append((face, normal))
+            elif isinstance(obj, DB.GeometryInstance):
+                found.extend(walk_geom(obj.GetInstanceGeometry()))
+        return found
+    
+    return walk_geom(geom)
+
 def get_dimension_type_by_name(doc, name):
     """Find a DimensionType by its name."""
     collector = DB.FilteredElementCollector(doc).OfClass(DB.DimensionType)
@@ -16,84 +44,84 @@ def get_dimension_type_by_name(doc, name):
     return None
 
 def create_dimensions_for_foundation(doc, view, foundation):
-    """Bulletproof dimension creation using named references and specific style."""
+    """Unified dimension logic: Face Scraping + Specific Style + View Alignment."""
     created_ids = []
     
-    # 1. Setup Directions and Style
+    # 1. Setup
     x_dir = view.RightDirection
     y_dir = view.UpDirection
     level_elev = view.GenLevel.Elevation if view.GenLevel else view.Origin.Z
     
-    # Specific Style requested by user
     dim_style_name = "Diagonal - 2.5mm Arial"
     dim_type = get_dimension_type_by_name(doc, dim_style_name)
-    if dim_type:
-        print("Using Dimension Style: {}".format(dim_style_name))
-    else:
-        print("Warning: Style '{}' not found. Using default.".format(dim_style_name))
 
     bbox = foundation.get_BoundingBox(view)
     if not bbox: return created_ids
     center = (bbox.Min + bbox.Max) / 2.0
+
+    # 2. Get Side Faces
+    side_faces = get_side_faces(foundation, view)
+    if not side_faces:
+        print("!!! No vertical side faces found for foundation {}.".format(foundation.Id))
+        return created_ids
+
+    # 3. Group by Normals
+    pairs = []
+    used = set()
+    for i in range(len(side_faces)):
+        if i in used: continue
+        f1, n1 = side_faces[i]
+        for j in range(i + 1, len(side_faces)):
+            if j in used: continue
+            f2, n2 = side_faces[j]
+            if abs(abs(n1.DotProduct(n2)) - 1.0) < 0.01:
+                pairs.append(((f1, n1), (f2, n2)))
+                used.add(i)
+                used.add(j)
+                break
     
-    # 2. Strategy: Use Named References (Most reliable for FamilyInstances)
-    # We map Revit's built-in reference types to our directions
-    # Width (Horizontal Dim): Needs Front and Back references
-    # Length (Vertical Dim): Needs Left and Right references
-    
-    def try_create(ref1_type, ref2_type, is_horizontal):
+    # 4. Create Dimensions
+    for pair in pairs:
+        (f1, n1), (f2, n2) = pair
+        
+        # Determine Placement (Right or Bottom)
+        placement_normal = n1
+        # If n1 is mostly X
+        if abs(n1.DotProduct(x_dir)) > 0.9:
+            # X-direction faces (needs Right side +X)
+            is_horizontal_dim = False # Line is Vertical
+            if n1.DotProduct(x_dir) < 0: placement_normal = n2
+        else:
+            # Y-direction faces (needs Bottom side -Y)
+            is_horizontal_dim = True # Line is Horizontal
+            if n1.DotProduct(y_dir) > 0: placement_normal = n2
+
+        ref_array = DB.ReferenceArray()
+        ref_array.Append(f1.Reference)
+        ref_array.Append(f2.Reference)
+        
+        # Position
+        dist = f1.Evaluate(DB.UV(0.5, 0.5)).DistanceTo(f2.Evaluate(DB.UV(0.5, 0.5)))
+        line_orig = center + placement_normal * (dist/2.0 + 1.5)
+        # Force Z to View level
+        line_orig = DB.XYZ(line_orig.X, line_orig.Y, level_elev)
+
+        perp_dir = y_dir if not is_horizontal_dim else x_dir
+        line = DB.Line.CreateBound(line_orig - perp_dir, line_orig + perp_dir)
+        
         try:
-            r1 = foundation.GetReferences(ref1_type)
-            r2 = foundation.GetReferences(ref2_type)
+            dim = None
+            if dim_type:
+                dim = doc.Create.NewDimension(view, line, ref_array, dim_type)
+            else:
+                dim = doc.Create.NewDimension(view, line, ref_array)
             
-            if r1 and r2:
-                ref_array = DB.ReferenceArray()
-                ref_array.Append(r1[0])
-                ref_array.Append(r2[0])
-                
-                if is_horizontal: # Width Dim (Placed at Bottom)
-                    offset = (bbox.Max.Y - bbox.Min.Y) / 2.0 + 1.5
-                    line_orig = DB.XYZ(center.X, center.Y - offset, level_elev)
-                    line = DB.Line.CreateBound(line_orig - x_dir, line_orig + x_dir)
-                else: # Length Dim (Placed at Right)
-                    offset = (bbox.Max.X - bbox.Min.X) / 2.0 + 1.5
-                    line_orig = DB.XYZ(center.X + offset, center.Y, level_elev)
-                    line = DB.Line.CreateBound(line_orig - y_dir, line_orig + y_dir)
-                
-                # Draw Debug Line
-                try: doc.Create.NewDetailCurve(view, line)
-                except: pass
-                
-                # Create Dimension
-                if dim_type:
-                    dim = doc.Create.NewDimension(view, line, ref_array, dim_type)
-                else:
-                    dim = doc.Create.NewDimension(view, line, ref_array)
-                
-                if dim:
-                    print(">>> Dimension created using {}/{} references.".format(ref1_type, ref2_type))
-                    return dim.Id
+            if dim:
+                created_ids.append(dim.Id)
+                print(">>> Created dim {}. Normal: {}".format(dim.Id, placement_normal))
         except Exception as e:
-            print("!!! Failed pair {}/{}: {}".format(ref1_type, ref2_type, e))
-        return None
-
-    # Try Width (Bottom)
-    wid = try_create(DB.FamilyInstanceReferenceType.Front, DB.FamilyInstanceReferenceType.Back, True)
-    if wid: created_ids.append(wid)
-    
-    # Try Length (Right)
-    len_id = try_create(DB.FamilyInstanceReferenceType.Left, DB.FamilyInstanceReferenceType.Right, False)
-    if len_id: created_ids.append(len_id)
-    
-    # FALLBACK: If named references failed, try Center references
-    if not wid:
-        wid = try_create(DB.FamilyInstanceReferenceType.CenterFrontBack, DB.FamilyInstanceReferenceType.Front, True)
-        if wid: created_ids.append(wid)
-    
-    if not len_id:
-        len_id = try_create(DB.FamilyInstanceReferenceType.CenterLeftRight, DB.FamilyInstanceReferenceType.Left, False)
-        if len_id: created_ids.append(len_id)
-
+            print("!!! Failed to create dimension: {}".format(e))
+            
     return created_ids
 
 def main():
