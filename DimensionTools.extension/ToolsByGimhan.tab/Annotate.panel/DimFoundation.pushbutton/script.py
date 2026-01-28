@@ -46,6 +46,7 @@ def get_side_faces(foundation, view):
 
 def create_dimensions(doc, view, foundation):
     """Create length and width dimensions for a rectangular foundation."""
+    count = 0
     side_faces = get_side_faces(foundation, view)
     
     if len(side_faces) < 4:
@@ -147,6 +148,8 @@ def create_dimensions(doc, view, foundation):
                 print(">>> Dimension object created successfully.")
         except Exception as e:
             print("!!! Failed to create dimension: {}".format(e))
+
+    return count
 
 def main():
     doc = revit.doc
