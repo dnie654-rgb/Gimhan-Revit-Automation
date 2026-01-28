@@ -82,16 +82,22 @@ def create_dimensions(doc, view, foundation):
     center = (bbox.Min + bbox.Max) / 2.0
     offset_dist = 1.0 # 1 foot offset for dimension line
 
+    # Ensure the Dimensions category is visible in the view
+    cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_Dimensions)
+    if not view.GetCategoryHidden(cat.Id):
+        # We can't really "force" it on effectively without knowing if it's hidden by filter
+        # but let's at least check if the category is hidden globally in the view.
+        pass
+    else:
+        try:
+            view.SetCategoryHidden(cat.Id, False)
+            print("Notice: 'Dimensions' category was hidden and has been turned on.")
+        except: pass
+
     for pair in pairs:
         (f1, n1), (f2, n2) = pair
         
-        # Decide which face to use to offset the dimension line
-        # To match the user image (Right and Bottom):
-        # - If pair is horizontal (normals in X), pick the face pointing Right (+X)
-        # - If pair is vertical (normals in Y), pick the face pointing Bottom (-Y)
-        
-        # Determine placement normal
-        # If n1.X is positive, it's the 'Right' face. If n1.Y is negative, it's the 'Bottom' face.
+        # Determine placement normal for Right/Bottom
         placement_normal = n1
         if abs(n1.X) > abs(n1.Y): # Horizontal pair (side faces)
             if n1.X < 0:
@@ -110,15 +116,30 @@ def create_dimensions(doc, view, foundation):
         dist = p1.DistanceTo(p2)
         
         # Position line outside the bounding box
+        # Use a slightly bigger offset (2.0 feet) for clarity
+        offset_dist = 2.0
         dim_line_origin = center + placement_normal * (dist/2.0 + offset_dist)
         
-        # The line itself should be perpendicular to the placement normal
-        perp_dir = DB.XYZ.BasisZ.CrossProduct(placement_normal).Normalize()
+        # EXTREMELY IMPORTANT: The line must be in the plane of the view
+        # We project the center onto the view's origin plane to ensure Z is consistent
+        view_plane = DB.Plane.CreateByNormalAndOrigin(view.ViewDirection, view.Origin)
+        # Project center to view plane
+        projection = view_plane.Normal.DotProduct(dim_line_origin - view.Origin)
+        dim_line_origin = dim_line_origin - view_plane.Normal * projection
+
+        # The dimension line direction should be perpendicular to the placement normal 
+        # but oriented relative to the view's Right/Up directions
+        if abs(placement_normal.X) > abs(placement_normal.Y):
+            perp_dir = view.UpDirection
+        else:
+            perp_dir = view.RightDirection
+            
         line = DB.Line.CreateBound(dim_line_origin - perp_dir, dim_line_origin + perp_dir)
         
         try:
-            doc.Create.NewDimension(view, line, ref_array)
-            count += 1
+            dim = doc.Create.NewDimension(view, line, ref_array)
+            if dim:
+                count += 1
         except Exception as e:
             print("Failed to create dimension for element {}: {}".format(foundation.Id, e))
 
