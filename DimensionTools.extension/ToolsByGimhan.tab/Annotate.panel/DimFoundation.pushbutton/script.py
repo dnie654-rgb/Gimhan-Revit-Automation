@@ -16,12 +16,12 @@ def get_dimension_type_by_name(doc, name):
     return None
 
 def create_dimensions_for_foundation(doc, view, fnd):
-    """Automated dimensioning based on edges."""
+    """Automated dimensioning: Corrected Logic & Placement."""
     created_ids = []
     level_elev = view.Origin.Z
     
-    # 200mm in feet (standard Revit units)
-    OFFSET = 200.0 / 304.8 
+    # 200mm to feet conversion (200 / 304.8)
+    OFFSET_FT = 0.656168 
     
     dim_style_name = "Diagonal - 2.5mm Arial"
     dim_type = get_dimension_type_by_name(doc, dim_style_name)
@@ -48,20 +48,21 @@ def create_dimensions_for_foundation(doc, view, fnd):
                 walk_geom(obj.GetInstanceGeometry())
 
     walk_geom(geom)
-    if not edges: return []
+    if not edges: 
+        print("No edges found with references for foundation {}".format(fnd.Id))
+        return []
 
     # 2. Extract Bounding Box for Placement
     bbox = fnd.get_BoundingBox(view)
     if not bbox: return []
     center = (bbox.Min + bbox.Max) / 2.0
 
-    # 3. Create Pairs for Vertical and Horizontal measurements
-    # Vertical Dims (measuring Y-distance, line is Horizontal)
-    # Horizontal Dims (measuring X-distance, line is Vertical)
+    # Logic:
+    # 1. Horizontal Edges (Up/Down) -> Measure Y-height -> Place on Right (+X)
+    # 2. Vertical Edges (Left/Right) -> Measure X-width -> Place on Top (+Y)
     
-    # Let's filter for unique lines based on normal directions
-    horiz_edges = [] # Edges aligned with X (measures X distance)
-    vert_edges = []  # Edges aligned with Y (measures Y distance)
+    horiz_edges = [] # X-aligned
+    vert_edges = []  # Y-aligned
     
     for ref, curve in edges:
         direction = curve.Direction
@@ -70,35 +71,32 @@ def create_dimensions_for_foundation(doc, view, fnd):
         elif abs(direction.DotProduct(DB.XYZ.BasisY)) > 0.99:
             vert_edges.append((ref, curve))
 
-    def create_dim_pair(edge_list, is_horizontal_measurement):
-        """Creates a dimension between extremist edges in the given list."""
+    def process_pair(edge_list, is_measuring_width):
+        """is_measuring_width = True means we measure Left-to-Right (X)."""
         if len(edge_list) < 2: return None
         
-        # Sort by coordinate to find extremities
-        if is_horizontal_measurement: # measuring X (horiz) distance
-            edge_list.sort(key=lambda x: x[1].GetEndPoint(0).Y)
-        else: # measuring Y (vertical) distance
+        # Sort to find the outermost edges
+        if is_measuring_width: # measuring X (between Vertical edges)
             edge_list.sort(key=lambda x: x[1].GetEndPoint(0).X)
+        else: # measuring Y (between Horizontal edges)
+            edge_list.sort(key=lambda x: x[1].GetEndPoint(0).Y)
 
-        e_low = edge_list[0][0]
-        e_high = edge_list[-1][0]
-        
         ref_array = DB.ReferenceArray()
-        ref_array.Append(e_low)
-        ref_array.Append(e_high)
+        ref_array.Append(edge_list[0][0])
+        ref_array.Append(edge_list[-1][0])
         
-        if is_horizontal_measurement:
-            # Placement: Above the footing (Top)
+        if is_measuring_width:
+            # Placement: Above the footing (Top side +Y)
             placement_normal = DB.XYZ(0, 1, 0)
             dim_line_dir = DB.XYZ(1, 0, 0)
-            offset_val = (bbox.Max.Y - bbox.Min.Y)/2.0 + OFFSET
+            offset_dist = (bbox.Max.Y - bbox.Min.Y)/2.0 + OFFSET_FT
         else:
-            # Placement: Right of the footing
+            # Placement: Right of the footing (Right side +X)
             placement_normal = DB.XYZ(1, 0, 0)
             dim_line_dir = DB.XYZ(0, 1, 0)
-            offset_val = (bbox.Max.X - bbox.Min.X)/2.0 + OFFSET
+            offset_dist = (bbox.Max.X - bbox.Min.X)/2.0 + OFFSET_FT
 
-        line_p1 = center + placement_normal * offset_val
+        line_p1 = center + placement_normal * offset_dist
         line_p1 = DB.XYZ(line_p1.X, line_p1.Y, level_elev)
         dim_line = DB.Line.CreateBound(line_p1 - dim_line_dir, line_p1 + dim_line_dir)
 
@@ -107,16 +105,16 @@ def create_dimensions_for_foundation(doc, view, fnd):
                 return doc.Create.NewDimension(view, dim_line, ref_array, dim_type)
             return doc.Create.NewDimension(view, dim_line, ref_array)
         except Exception as e:
-            print("Auto-Dim Error: {}".format(e))
+            print("Auto-Dim Pair Error: {}".format(e))
             return None
 
-    # Measure Vertical (Y) -> Place on Right
-    d1 = create_dim_pair(vert_edges, False)
-    if d1: created_ids.append(d1.Id)
+    # Horizontal Dims (measuring X, using Vertical edges) -> Upper side
+    d_width = process_pair(vert_edges, True)
+    if d_width: created_ids.append(d_width.Id)
     
-    # Measure Horizontal (X) -> Place on Top
-    d2 = create_dim_pair(horiz_edges, True)
-    if d2: created_ids.append(d2.Id)
+    # Vertical Dims (measuring Y, using Horizontal edges) -> Right side
+    d_height = process_pair(horiz_edges, False)
+    if d_height: created_ids.append(d_height.Id)
 
     return created_ids
 
