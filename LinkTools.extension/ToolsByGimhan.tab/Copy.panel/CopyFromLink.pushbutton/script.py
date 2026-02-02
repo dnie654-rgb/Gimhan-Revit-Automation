@@ -2,11 +2,15 @@
 # -*- coding: utf-8 -*-
 
 from pyrevit import revit, DB, forms, script
-from Autodesk.Revit.UI.Selection import ObjectType
 from System.Collections.Generic import List
 
 doc = revit.doc
 uidoc = revit.uidoc
+
+class CategoryWrapper(forms.TemplateListItem):
+    @property
+    def name(self):
+        return self.item.Name
 
 def main():
     # 1. Collect all Link Instances
@@ -17,13 +21,10 @@ def main():
         forms.alert("No linked models found in the current project.", exitscript=True)
     
     # Map Name -> LinkInstance
-    # Use GetLinkDocument() to check if it's loaded
     link_dict = {}
     for link in links:
         link_doc = link.GetLinkDocument()
         if link_doc:
-            # Create a nice name: "Link Name - [Link Instance ID]"
-            # Using Name property of instance, usually matches type name
             name = "{} (ID: {})".format(link.Name, link.Id)
             link_dict[name] = link
     
@@ -46,54 +47,52 @@ def main():
     source_doc = selected_link_instance.GetLinkDocument()
     transform = selected_link_instance.GetTotalTransform()
     
-    # 3. Pick Elements from that Link
-    # Note: PickObjects with LinkedElement allows picking nested elements
-    try:
-        references = uidoc.Selection.PickObjects(
-            ObjectType.LinkedElement, 
-            "Select elements in the Link to Copy"
-        )
-    except Exception as e:
-        # Check if it was just a cancellation
-        if "Operation canceled by user" in str(e):
-             script.exit() # Clean exit
-        else:
-             forms.alert("Error during selection: {}".format(e))
-             return
-
-    if not references:
-        return
-
-    ids_to_copy = []
+    # 3. Collect all elements in that link to find categories
+    all_elements = DB.FilteredElementCollector(source_doc).WhereElementIsNotElementType().ToElements()
     
-    for ref in references:
-        # Validate that the pick comes from the SELECTED link
-        # ref.ElementId is the ID of the Link Instance
-        if ref.ElementId == selected_link_instance.Id:
-            ids_to_copy.append(ref.LinkedElementId)
-        else:
-            print("Skipped selection from a different link instance.")
+    category_map = {}
+    for el in all_elements:
+        if el.Category:
+            cat_id = el.Category.Id.IntegerValue
+            if cat_id not in category_map:
+                category_map[cat_id] = el.Category
 
-    if not ids_to_copy:
-        forms.alert("No elements selected from the chosen link.", exitscript=True)
+    # 4. Select Categories
+    sorted_categories = sorted(category_map.values(), key=lambda c: c.Name)
+    selected_categories = forms.SelectFromList.show(
+        [CategoryWrapper(c) for c in sorted_categories],
+        title="Select Categories to Copy from Link",
+        multiselect=True,
+        button_name="Select Categories"
+    )
 
-    # 4. Copy Elements
-    t = DB.Transaction(doc, "Copy Linked Elements")
+    if not selected_categories:
+        script.exit()
+
+    selected_cat_ids = [c.Id for c in selected_categories]
+
+    # 5. Collect Elements of Selected Categories
+    cat_filter = DB.ElementMulticategoryFilter(List[DB.ElementId](selected_cat_ids))
+    elements_to_copy = DB.FilteredElementCollector(source_doc).WherePasses(cat_filter).WhereElementIsNotElementType().ToElementIds()
+
+    if not elements_to_copy:
+        forms.alert("No elements found in selected categories.", exitscript=True)
+
+    # 6. Copy Elements
+    t = DB.Transaction(doc, "Copy Linked Elements by Category")
     t.Start()
     
     try:
-        # CopyElements(sourceDoc, sourceElementIds, destinationDoc, transform, options)
         options = DB.CopyPasteOptions()
         copied_ids = DB.ElementTransformUtils.CopyElements(
             source_doc,
-            List[DB.ElementId](ids_to_copy), # Create .NET List
+            elements_to_copy,
             doc,
             transform, 
             options
         )
         
-        print("Successfully copied {} elements.".format(len(copied_ids)))
-        print("IDs: {}".format([i.IntegerValue for i in copied_ids]))
+        print("Successfully copied {} elements from link.".format(len(copied_ids)))
         
     except Exception as e:
         print("Error during copy: {}".format(e))
