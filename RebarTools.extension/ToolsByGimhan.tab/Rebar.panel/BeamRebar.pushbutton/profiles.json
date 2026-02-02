@@ -1,0 +1,140 @@
+{
+  "test": {
+    "Global": {
+      "BeamWidth": "200", 
+      "StirrupType": "10mm", 
+      "EndSpacing": "150", 
+      "BeamHeight": "300", 
+      "EndOffset": "40", 
+      "BarType": "10mm", 
+      "MidSpacing": "250", 
+      "SideCover": "25"
+    }, 
+    "End Sections": {
+      "B1": 2, 
+      "B2": 0, 
+      "T1": 2, 
+      "T2": 0
+    }, 
+    "Middle Section": {
+      "B1": 0, 
+      "B2": 0, 
+      "T1": 0, 
+      "T2": 0
+    }
+  }, 
+  "b4": {
+    "End Sections": {
+      "B1": 4, 
+      "T1": 4, 
+      "T2": 2, 
+      "B2": 2
+    }, 
+    "Global": {
+      "SideCover": "25", 
+      "BeamWidth": "200", 
+      "MidSpacing": "250", 
+      "EndOffset": "40", 
+      "BarType": "T12", 
+      "BeamHeight": "400", 
+      "EndSpacing": "150", 
+      "StirrupType": "R6"
+    }, 
+    "Middle Section": {
+      "B1": 4, 
+      "T1": 4, 
+      "T2": 3, 
+      "B2": 3
+    }
+  }, 
+  "Default": {
+    "End Sections": {
+      "B1": 2, 
+      "T1": 2, 
+      "T2": 0, 
+      "B2": 0
+    }, 
+    "Global": {
+      "SideCover": 25, 
+      "MidSpacing": 250, 
+      "EndOffset": 40, 
+      "BarType": null, 
+      "StirrupType": null, 
+      "EndSpacing": 150
+    }, 
+    "Middle Section": {
+      "B1": 2, 
+      "T1": 2, 
+      "T2": 0, 
+      "B2": 0
+    }
+  }, 
+  "B1": {
+    "End Sections": {
+      "T2": 4, 
+      "T1": 4, 
+      "B1": 4, 
+      "B2": 4
+    }, 
+    "Global": {
+      "SideCover": "25", 
+      "MidSpacing": "250", 
+      "EndOffset": "40", 
+      "BarType": "22M", 
+      "EndSpacing": "150", 
+      "StirrupType": "13M"
+    }, 
+    "Middle Section": {
+      "T2": 3, 
+      "T1": 3, 
+      "B1": 3, 
+      "B2": 3
+    }
+  }, 
+  "b3": {
+    "End Sections": {
+      "B1": 4, 
+      "T1": 4, 
+      "T2": 2, 
+      "B2": 2
+    }, 
+    "Global": {
+      "SideCover": "25", 
+      "BeamWidth": "300", 
+      "MidSpacing": "250", 
+      "EndOffset": "40", 
+      "BarType": "T12", 
+      "BeamHeight": "400", 
+      "EndSpacing": "150", 
+      "StirrupType": "R6"
+    }, 
+    "Middle Section": {
+      "B1": 4, 
+      "T1": 4, 
+      "T2": 3, 
+      "B2": 3
+    }
+  }, 
+  "Heavy Top": {
+    "End Sections": {
+      "B1": 2, 
+      "T1": 3, 
+      "T2": 2, 
+      "B2": 0
+    }, 
+    "Global": {
+      "SideCover": 25, 
+      "MidSpacing": 200, 
+      "EndOffset": 40, 
+      "BarType": null, 
+      "StirrupType": null, 
+      "EndSpacing": 100
+    }, 
+    "Middle Section": {
+      "B1": 2, 
+      "T1": 2, 
+      "T2": 0, 
+      "B2": 0
+    }
+  }
+}

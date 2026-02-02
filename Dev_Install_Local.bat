@@ -29,6 +29,11 @@ echo [*] Copying HostTools.extension...
 if exist "%EXTENSIONS_DIR%\HostTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\HostTools.extension"
 xcopy "%SOURCE_DIR%HostTools.extension" "%EXTENSIONS_DIR%\HostTools.extension\" /E /I /Y /Q
 
+:: RebarTools
+echo [*] Copying RebarTools.extension...
+if exist "%EXTENSIONS_DIR%\RebarTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\RebarTools.extension"
+xcopy "%SOURCE_DIR%RebarTools.extension" "%EXTENSIONS_DIR%\RebarTools.extension\" /E /I /Y /Q
+
 :: Update Extension
 echo [*] Copying Update.extension...
 if exist "%EXTENSIONS_DIR%\Update.extension" rmdir /s /q "%EXTENSIONS_DIR%\Update.extension"
