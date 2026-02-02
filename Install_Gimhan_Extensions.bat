@@ -58,11 +58,6 @@ if exist "%SOURCE_DIR%\HostTools.extension" (
     move "%SOURCE_DIR%\HostTools.extension" "%EXTENSIONS_DIR%\"
 )
 
-if exist "%SOURCE_DIR%\RebarTools.extension" (
-    if exist "%EXTENSIONS_DIR%\RebarTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\RebarTools.extension"
-    move "%SOURCE_DIR%\RebarTools.extension" "%EXTENSIONS_DIR%\"
-)
-
 if exist "%SOURCE_DIR%\Update.extension" (
     if exist "%EXTENSIONS_DIR%\Update.extension" rmdir /s /q "%EXTENSIONS_DIR%\Update.extension"
     move "%SOURCE_DIR%\Update.extension" "%EXTENSIONS_DIR%\"
