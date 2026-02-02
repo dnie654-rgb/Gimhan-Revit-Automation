@@ -34,6 +34,20 @@ if "%commit_msg%"=="" set commit_msg=Auto Update
 
 git commit -m "%commit_msg%"
 
+:: Pull latest changes
+echo.
+echo [*] Pulling latest changes from GitHub...
+git pull origin master --rebase
+
+if %errorlevel% neq 0 (
+    color 0C
+    echo.
+    echo [WARNING] Pull failed or had conflicts.
+    echo Please resolve conflicts manually or check your connection.
+    pause
+    exit /b
+)
+
 :: Push
 echo.
 echo [*] Pushing to GitHub...
