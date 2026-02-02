@@ -7,16 +7,16 @@ from System.Collections.Generic import List
 doc = revit.doc
 uidoc = revit.uidoc
 
-def get_selected_elements():
-    selection = uidoc.Selection.GetElementIds()
-    if not selection:
-         # Optional: Prompt to pick
-         try:
-             refs = uidoc.Selection.PickObjects(DB.ObjectType.Element, "Select elements to change Level")
-             return [doc.GetElement(r.ElementId) for r in refs]
-         except:
-             return []
-    return [doc.GetElement(id) for id in selection]
+class ElementWrapper(forms.TemplateListItem):
+    @property
+    def name(self):
+        el = self.item
+        category = el.Category.Name if el.Category else "No Category"
+        try:
+            name = DB.Element.Name.__get__(el)
+        except:
+            name = "Unnamed"
+        return "[{}] {} ({})".format(category, name, el.Id)
 
 def get_level_param(element):
     # Try different parameter sources for "Level"
@@ -65,41 +65,77 @@ def get_offset_param(element):
     return None
 
 def main():
-    # 1. Get Elements
-    elements = get_selected_elements()
-    if not elements:
-        forms.alert("No elements selected.", exitscript=True)
-
-    # 2. Get Levels
+    # 1. Get All Levels
     levels = list(DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements())
     levels.sort(key=lambda l: l.Elevation)
     
-    level_dict = {}
-    for l in levels:
-        name = l.Name
-        level_dict[name] = l
+    level_dict = {l.Name: l for l in levels}
+    sorted_level_names = sorted(level_dict.keys(), key=lambda n: level_dict[n].Elevation)
 
-    selected_level_name = forms.SelectFromList.show(
-        sorted(level_dict.keys(), key=lambda n: level_dict[n].Elevation),
-        title="Select Target Level",
+    # 2. Select Source Level
+    source_level_name = forms.SelectFromList.show(
+        sorted_level_names,
+        title="Select Source Level (Where elements are now)",
+        multiselect=False
+    )
+    if not source_level_name:
+        script.exit()
+    
+    source_level = level_dict[source_level_name]
+    source_level_id = source_level.Id
+
+    # 3. Filter Elements on Source Level
+    all_elements = DB.FilteredElementCollector(doc).WhereElementIsNotElementType().ToElements()
+    hosted_elements = []
+    
+    for el in all_elements:
+        # Check LevelId property
+        if el.LevelId == source_level_id:
+            hosted_elements.append(el)
+            continue
+        
+        # Fallback check via parameters if LevelId is invalid
+        p_level = get_level_param(el)
+        if p_level and p_level.StorageType == DB.StorageType.ElementId:
+            if p_level.AsElementId() == source_level_id:
+                hosted_elements.append(el)
+
+    if not hosted_elements:
+        forms.alert("No elements found on level: {}".format(source_level_name), exitscript=True)
+
+    # 4. Select Elements to Transfer
+    selected_elements = forms.SelectFromList.show(
+        [ElementWrapper(el) for el in hosted_elements],
+        title="Select Elements to Transfer",
+        multiselect=True,
+        button_name="Select Elements"
+    )
+    
+    if not selected_elements:
+        script.exit()
+
+    # 5. Select Target Level
+    target_level_name = forms.SelectFromList.show(
+        sorted_level_names,
+        title="Select Target Level (Destination)",
         multiselect=False
     )
     
-    if not selected_level_name:
+    if not target_level_name:
         script.exit()
         
-    target_level = level_dict[selected_level_name]
+    target_level = level_dict[target_level_name]
     target_level_id = target_level.Id
     target_elevation = target_level.Elevation
 
-    # 3. Transaction
+    # 6. Transaction
     t = DB.Transaction(doc, "Change Element Level (Keep Position)")
     t.Start()
     
     success_count = 0
     fail_count = 0
     
-    for el in elements:
+    for el in selected_elements:
         try:
             # A. Get Level Param
             p_level = get_level_param(el)
@@ -109,12 +145,10 @@ def main():
                 continue
                 
             # B. Get Current Level info
-            # We can try to get the element's current level from the parameter or LevelId property
             current_level_id = el.LevelId
             if current_level_id == DB.ElementId.InvalidElementId:
-                # Try getting from parameter if LevelId property is invalid (some families)
                  if p_level.StorageType == DB.StorageType.ElementId:
-                     current_level_id = p_level.AsElementId()
+                      current_level_id = p_level.AsElementId()
             
             if current_level_id == DB.ElementId.InvalidElementId:
                 print("Element {}: Could not determine current Level.".format(el.Id))
@@ -123,7 +157,6 @@ def main():
                 
             current_level = doc.GetElement(current_level_id)
             if not current_level:
-                 # valid ID but element null?
                  print("Element {}: Current Level not found.".format(el.Id))
                  fail_count += 1
                  continue
@@ -137,10 +170,7 @@ def main():
                 current_offset_val = p_offset.AsDouble()
             
             # D. Calculate Position
-            # Absolute Z = CurrentLevelZ + CurrentOffset
             absolute_z = current_elevation_base + current_offset_val
-            
-            # New Offset = Absolute Z - TargetLevelZ
             new_offset_val = absolute_z - target_elevation
             
             # E. Apply
@@ -148,7 +178,6 @@ def main():
             if p_offset:
                 p_offset.Set(new_offset_val)
             elif abs(new_offset_val) > 0.001:
-                # If we need an offset but found no parameter, warn user
                 print("Element {}: Changed Level, but could not set Offset to maintain position.".format(el.Id))
             
             success_count += 1
