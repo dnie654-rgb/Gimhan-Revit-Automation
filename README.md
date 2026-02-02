@@ -15,10 +15,10 @@ Tools for interacting with Revit Links.
 ### 3. HostTools
 Tools for modifying element hosts.
 - **Change Level**: Batch change the Host Level of selected elements while preserving their 3D position (automatically adjusting offsets).
+- **Toggle Grid Bubbles**: Easily toggle the bubble visibility on either side of selected grids.
 
 ### 4. DimensionTools
-Automates dimensioning for various Revit elements.
-- **Foundation Dim**: Automatically adds length and width dimensions to rectangular foundations in plan views, placed on the right and bottom sides.
+Automated dimensioning and management tools.
 
 ## Installation
 

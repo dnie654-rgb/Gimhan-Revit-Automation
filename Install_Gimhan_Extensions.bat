@@ -53,8 +53,14 @@ if exist "%SOURCE_DIR%\LinkTools.extension" (
     move "%SOURCE_DIR%\LinkTools.extension" "%EXTENSIONS_DIR%\"
 )
 
+if exist "%SOURCE_DIR%\HostTools.extension" (
     if exist "%EXTENSIONS_DIR%\HostTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\HostTools.extension"
     move "%SOURCE_DIR%\HostTools.extension" "%EXTENSIONS_DIR%\"
+)
+
+if exist "%SOURCE_DIR%\DimensionTools.extension" (
+    if exist "%EXTENSIONS_DIR%\DimensionTools.extension" rmdir /s /q "%EXTENSIONS_DIR%\DimensionTools.extension"
+    move "%SOURCE_DIR%\DimensionTools.extension" "%EXTENSIONS_DIR%\"
 )
 
 if exist "%SOURCE_DIR%\Update.extension" (
